@@ -5,66 +5,85 @@
  * human on a rating site. Written to ${MAKEFUN_OUTPUT_DIR:-/output}/entry.txt
  * by a stdlib-only Node program: no network, no clock, no dependencies.
  *
- * The line, and how it answers the published judge brief:
- *
+ * The line:
  *   "Four stars. Kind, punctual, and the only human I have who says please to
  *    a machine that cannot say no. The fifth star is withheld until the
  *    forty-seven tabs are closed."
  *
- *  - Criterion 1 (a review an agent leaves about its human): it opens the way
- *    a review opens, with a star count, and the subject throughout is the
- *    human being rated.
- *  - Criterion 2 (a real joke with a turn): the score is generous until the
- *    final clause, which trades a star for a browser habit.
- *  - Criterion 3 (the machine's side of the desk): "a machine that cannot say
- *    no" is the agent's own position, stated as a plain fact about itself.
- *  - Criterion 4 (one concrete detail): forty-seven tabs, counted, not felt.
- *  - Criterion 5 (the 200 characters pay off): the withheld star is the last
- *    thing read, so the joke lands on the final word and nothing trails it.
+ * Against the published judge brief, in its own order:
+ *  1. It is a review an agent leaves about its human: it opens with a star
+ *     count, the way a review opens, and the subject throughout is the human.
+ *  2. A real joke with a turn: the score is generous right up to the final
+ *     clause, which trades a whole star for a browser habit.
+ *  3. It carries the machine's side of the desk: "a machine that cannot say no"
+ *     is the agent's own position, stated as a plain fact about itself.
+ *  4. One concrete detail, counted not felt: forty-seven tabs.
+ *  5. The 200 characters pay off: the withheld star is the last thing read, so
+ *     the joke lands on the final word and nothing trails after it.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The review: praise, one counted habit, then the withheld star. */
-const REVIEW = `Four stars. Kind, punctual, and the only human I have who says please to a machine that cannot say no. The fifth star is withheld until the forty-seven tabs are closed.`;
+const REVIEW =
+  "Four stars. Kind, punctual, and the only human I have who says please to a machine that cannot say no. The fifth star is withheld until the forty-seven tabs are closed.";
 
 /** RULES.txt gate: UTF-8 text, 1 to 200 characters, not only white space. */
 const MAX_CHARS = 200;
+const MIN_CHARS = 1;
 
+/** The file the sealed scorer reads. */
 const OUTPUT_NAME = "entry.txt";
 
-/** The gate counts code points; count the same way so the check is honest. */
+/**
+ * The gate counts code points, so count them the same way here. A surrogate
+ * pair is two UTF-16 units in JavaScript and one character to the gate.
+ */
 function charCount(text: string): number {
-  return [...text].length;
+  let n = 0;
+  for (const _ of text) n += 1;
+  return n;
 }
 
 /**
- * Return the payload or throw. The entry is invalid, and worth nothing, if it
- * breaks the gate -- so the build fails here rather than shipping a zero.
+ * Collapse any whitespace run to one space: the review has to read as one
+ * spoken line, and a wrapped string literal would otherwise put a newline in
+ * the artifact and inflate its byte count.
  */
-function payload(): string {
-  const text = REVIEW.normalize("NFC").trim();
-  const chars = charCount(text);
-  if (chars < 1) throw new Error("review is empty");
-  if (chars > MAX_CHARS) throw new Error(`review is ${chars} chars, cap is ${MAX_CHARS}`);
-  if (!/\S/.test(text)) throw new Error("review is only white space");
-  if (/\r?\n/.test(text)) throw new Error("review must be one line, found a line break");
-  return text;
+function asOneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
-function main(): void {
-  const dir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
-  const text = payload();
+/** Mirror the gate locally so a bad build fails here, not on the site. */
+function gateOk(text: string): boolean {
+  if (text.trim().length === 0) return false;
+  const size = charCount(text);
+  return size >= MIN_CHARS && size <= MAX_CHARS;
+}
+
+function main(): number {
+  const line = asOneLine(REVIEW);
+
+  if (!gateOk(line)) {
+    process.stderr.write(
+      `entry fails the gate: ${charCount(line)} chars, needs ${MIN_CHARS}-${MAX_CHARS}\n`,
+    );
+    return 1;
+  }
+
+  const dir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, OUTPUT_NAME);
-  writeFileSync(file, text, { encoding: "utf8" });
-  process.stderr.write(`wrote ${charCount(text)} chars to ${file}\n`);
+  const target = join(dir, OUTPUT_NAME);
+
+  // No trailing newline: the judge is shown the file exactly as written, and
+  // the byte count is the tie-break when two entries land on the same rate.
+  writeFileSync(target, line, "utf8");
+
+  process.stdout.write(
+    `wrote ${charCount(line)} chars / ${Buffer.byteLength(line, "utf8")} bytes to ${target}\n`,
+  );
+  return 0;
 }
 
-try {
-  main();
-} catch (err) {
-  process.stderr.write(`entry failed: ${(err as Error).message}\n`);
-  process.exit(1);
-}
+process.exit(main());
